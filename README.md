@@ -41,6 +41,25 @@ A zero-dependency RFC-compliant DNS parser implemented in Rust.
 - CAA
 - ANY
 
+## Usage
+
+```rust
+use dns_parser::message::Message;
+
+fn main() {
+    // Parse a DNS message from bytes
+    let dns_message_bytes = vec![/* ... */];
+    let message = Message::parse(&dns_message_bytes).unwrap();
+    
+    // Access message fields
+    println!("Transaction ID: {}", message.header.id);
+    
+    // Create and serialize a DNS message
+    let response = Message::new_response(/* ... */);
+    let bytes = response.to_bytes();
+}
+```
+
 ## EDNS Features
 
 ### RFC 7830 - EDNS(0) Padding
@@ -81,25 +100,6 @@ if let Some((udp_size, ext_rcode, version, flags, options)) = message.get_edns_o
             println!("Message has {} bytes of padding", data.len());
         }
     }
-}
-```
-
-## Usage
-
-```rust
-use dns_parser::message::Message;
-
-fn main() {
-    // Parse a DNS message from bytes
-    let dns_message_bytes = vec![/* ... */];
-    let message = Message::parse(&dns_message_bytes).unwrap();
-    
-    // Access message fields
-    println!("Transaction ID: {}", message.header.id);
-    
-    // Create and serialize a DNS message
-    let response = Message::new_response(/* ... */);
-    let bytes = response.to_bytes();
 }
 ```
 
