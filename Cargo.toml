@@ -1,0 +1,10 @@
+[package]
+name = "dns-parser"
+version = "0.1.0"
+edition = "2021"
+description = "Zero-dependency RFC-compliant DNS parser"
+authors = ["Eren Demirel"]
+readme = "README.md"
+license = "MIT"
+
+[dependencies]
