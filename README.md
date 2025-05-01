@@ -1,6 +1,6 @@
 # DNS Parser
 
-A zero-dependency RFC-compliant DNS parser implemented in Rust.
+Zero-dependency RFC-compliant DNS parser implemented in Rust.
 
 ## Features
 
