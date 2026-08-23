@@ -28,20 +28,20 @@ impl DnsName {
 
         let mut labels = Vec::new();
         let parts = name.split('.').collect::<Vec<&str>>();
-        
+
         for part in parts {
             if part.is_empty() {
                 continue; // Skip empty parts (e.g., trailing dot)
             }
-            
+
             if part.len() > MAX_LABEL_LENGTH {
                 return Err(Error::InvalidName);
             }
-            
-            if !part.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+
+            if !is_valid_label(part, labels.is_empty()) {
                 return Err(Error::InvalidName);
             }
-            
+
             labels.push(part.to_string());
         }
         
@@ -131,12 +131,12 @@ impl DnsName {
                 return Err(Error::Underrun);
             }
             
-            let label_bytes = &current_buffer[pos+1..pos+1+label_len];
-            if !label_bytes.iter().all(|&b| b.is_ascii_alphanumeric() || b == b'-') {
-                 return Err(Error::InvalidName); 
+            let label_bytes = &current_buffer[pos + 1..pos + 1 + label_len];
+            if !is_valid_wire_label(label_bytes, labels.is_empty()) {
+                return Err(Error::InvalidName);
             }
-            let label = unsafe { String::from_utf8_unchecked(label_bytes.to_vec()) }; // Unsafe OK after check
-            
+            let label = unsafe { String::from_utf8_unchecked(label_bytes.to_vec()) };
+
             labels.push(label);
             pos += label_len + 1;
         }
@@ -203,4 +203,28 @@ impl fmt::Display for DnsName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_string())
     }
+}
+
+/// Validates a label when constructing a name from text.
+///
+/// Allows letters, digits, hyphen, and underscore (needed for SRV style names).
+/// A lone `*` is allowed only as the leftmost label (wildcard names).
+fn is_valid_label(part: &str, is_leftmost: bool) -> bool {
+    if part == "*" {
+        return is_leftmost;
+    }
+
+    part.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Validates a label decoded from the wire.
+fn is_valid_wire_label(label_bytes: &[u8], is_leftmost: bool) -> bool {
+    if label_bytes == b"*" {
+        return is_leftmost;
+    }
+
+    label_bytes
+        .iter()
+        .all(|&b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 } 
