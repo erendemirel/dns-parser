@@ -1,10 +1,13 @@
 [package]
 name = "dns-parser"
 version = "0.1.0"
-edition = "2025"
-description = "Zero-dependency RFC-compliant DNS parser"
+edition = "2021"
+description = "Zero dependency DNS message wire format codec"
 authors = ["Eren Demirel"]
 readme = "README.md"
 license = "MIT"
+repository = "https://github.com/erendemirel/dns-parser"
+keywords = ["dns", "parser", "codec", "edns"]
+categories = ["network-programming", "parsing"]
 
 [dependencies]

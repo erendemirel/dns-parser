@@ -285,102 +285,105 @@ impl Message {
     }
     
     /// Add padding to the message (RFC 7830)
-    /// 
+    ///
     /// This method adds the EDNS(0) padding option to make the DNS message a specific size.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `target_size` - The desired size for the message
     pub fn add_padding(&mut self, target_size: usize) -> Result<&mut Self> {
-
         let current_size = self.to_bytes().len();
-        
+
         if current_size >= target_size {
             return Ok(self);
         }
-        
+
         // Find and remove any existing OPT record
         let mut existing_opt = None;
         let mut opt_index = None;
-        
+
         for (i, rr) in self.additionals.iter().enumerate() {
             if let RecordType::OPT = rr.record_type {
                 opt_index = Some(i);
-                if let RData::OPT { udp_payload_size, extended_rcode, version, flags, options } = &rr.data {
-                    existing_opt = Some((*udp_payload_size, *extended_rcode, *version, *flags, 
-                        options.iter().filter(|&(code, _)| *code != EdnsOption::Padding.to_u16())
-                               .map(|(code, data)| (*code, data.clone()))
-                               .collect::<Vec<_>>()));
+                if let RData::OPT {
+                    udp_payload_size,
+                    extended_rcode,
+                    version,
+                    flags,
+                    options,
+                } = &rr.data
+                {
+                    existing_opt = Some((
+                        *udp_payload_size,
+                        *extended_rcode,
+                        *version,
+                        *flags,
+                        options
+                            .iter()
+                            .filter(|&(code, _)| *code != EdnsOption::Padding.to_u16())
+                            .map(|(code, data)| (*code, data.clone()))
+                            .collect::<Vec<_>>(),
+                    ));
                 }
                 break;
             }
         }
-        
-        // Remove existing OPT record if found
+
         if let Some(i) = opt_index {
             self.additionals.remove(i);
         }
-        
+
         let size_without_opt = self.to_bytes().len();
-        
-        // OPT record overhead is approximately 11 bytes for an empty record
-        // Padding option adds 4 bytes overhead (2 for code, 2 for length)
-        let opt_overhead = 15; // 11 bytes for OPT record + 4 for option headers
-        
-        let padding_size = match target_size.checked_sub(size_without_opt + opt_overhead) {
+
+        let udp_size = existing_opt
+            .as_ref()
+            .map(|(size, _, _, _, _)| *size)
+            .unwrap_or(4096);
+        let ext_rcode = existing_opt
+            .as_ref()
+            .map(|(_, rcode, _, _, _)| *rcode)
+            .unwrap_or(0);
+        let version = existing_opt
+            .as_ref()
+            .map(|(_, _, ver, _, _)| *ver)
+            .unwrap_or(0);
+        let flags = existing_opt
+            .as_ref()
+            .map(|(_, _, _, f, _)| *f)
+            .unwrap_or(0);
+
+        let other_options_wire_len = existing_opt
+            .as_ref()
+            .map(|(_, _, _, _, options)| {
+                options
+                    .iter()
+                    .map(|(_, data)| 4 + data.len())
+                    .sum::<usize>()
+            })
+            .unwrap_or(0);
+
+        // Empty OPT RR header is 11 bytes (root name + type/class/ttl/rdlength).
+        // Each option adds 4 bytes of header, plus the padding payload.
+        let opt_overhead = 11 + other_options_wire_len + 4;
+
+        let mut padding_size = match target_size.checked_sub(size_without_opt + opt_overhead) {
             Some(size) => size,
             None => 0,
         };
-        
-        let mut options = Vec::new();
-        
-        if let Some((_, _, _, _, existing_options)) = &existing_opt {
-            options.extend(existing_options.clone());
-        }
-        
-        options.push((EdnsOption::Padding.to_u16(), vec![0; padding_size as usize]));
-        
-        let udp_size = existing_opt.as_ref().map(|(size, _, _, _, _)| *size).unwrap_or(4096);
-        let ext_rcode = existing_opt.as_ref().map(|(_, rcode, _, _, _)| *rcode).unwrap_or(0);
-        let version = existing_opt.as_ref().map(|(_, _, ver, _, _)| *ver).unwrap_or(0);
-        let flags = existing_opt.as_ref().map(|(_, _, _, f, _)| *f).unwrap_or(0);
-        
+
         let ttl = (ext_rcode as u32) << 24 | (version as u32) << 16 | flags as u32;
-        
-        let opt_record = ResourceRecord::new(
-            DnsName::new(".").unwrap(),
-            RecordType::OPT,
-            Class::from_u16(udp_size),
-            ttl,
-            RData::OPT {
-                udp_payload_size: udp_size,
-                extended_rcode: ext_rcode,
-                version,
-                flags,
-                options,
-            },
-        );
-        
-        // Add the OPT record
-        self.additionals.push(opt_record);
-        
-        let final_size = self.to_bytes().len();
-        
-        if final_size < target_size {
-            let additional_padding = target_size - final_size;
-            self.additionals.pop();           
-            let mut updated_options = Vec::new();
-            
+
+        let build_options = |pad_len: usize| {
+            let mut options = Vec::new();
             if let Some((_, _, _, _, existing_options)) = &existing_opt {
-                updated_options.extend(existing_options.clone());
+                options.extend(existing_options.clone());
             }
-            
-            updated_options.push((
-                EdnsOption::Padding.to_u16(), 
-                vec![0; (padding_size + additional_padding) as usize]
-            ));
-            
-            let updated_opt_record = ResourceRecord::new(
+            options.push((EdnsOption::Padding.to_u16(), vec![0; pad_len]));
+            options
+        };
+
+        let make_opt = |pad_len: usize| {
+            ResourceRecord::new(
                 DnsName::new(".").unwrap(),
                 RecordType::OPT,
                 Class::from_u16(udp_size),
@@ -390,15 +393,48 @@ impl Message {
                     extended_rcode: ext_rcode,
                     version,
                     flags,
-                    options: updated_options,
+                    options: build_options(pad_len),
                 },
-            );
-            
-            self.additionals.push(updated_opt_record);
+            )
+        };
 
+        self.additionals.push(make_opt(padding_size));
+        self.header.additional_count = self.additionals.len() as u16;
+
+        let mut final_size = self.to_bytes().len();
+
+        if final_size != target_size {
+            if final_size < target_size {
+                padding_size += target_size - final_size;
+            } else {
+                let excess = final_size - target_size;
+                if excess > padding_size {
+                    // Cannot shrink enough; keep the closest achievable size.
+                    self.header.additional_count = self.additionals.len() as u16;
+                    return Ok(self);
+                }
+                padding_size -= excess;
+            }
+
+            self.additionals.pop();
+            self.additionals.push(make_opt(padding_size));
             self.header.additional_count = self.additionals.len() as u16;
+            final_size = self.to_bytes().len();
+
+            // One more correction pass if compression or length fields shifted the size.
+            if final_size != target_size {
+                if final_size < target_size {
+                    padding_size += target_size - final_size;
+                } else if final_size - target_size <= padding_size {
+                    padding_size -= final_size - target_size;
+                }
+
+                self.additionals.pop();
+                self.additionals.push(make_opt(padding_size));
+                self.header.additional_count = self.additionals.len() as u16;
+            }
         }
-        
+
         Ok(self)
     }
     

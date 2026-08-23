@@ -1,8 +1,11 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 
-use dns_parser::Message; 
+use dns_parser::Message;
 
 fuzz_target!(|data: &[u8]| {
-    let _ = Message::parse(data);
-}); 
+    if let Ok(message) = Message::parse(data) {
+        let encoded = message.to_bytes();
+        let _ = Message::parse(&encoded);
+    }
+});
